@@ -1,6 +1,17 @@
+"""
+PDF Multi-Modal Document Parser & Chunker (PDF多模态文档解析与切分器)
+
+此脚本主要用于大模型 RAG (Retrieval-Augmented Generation) 数据预处理。
+功能演进说明：
+- [v1.0] 纯文本提取：实现基础的 PDF 文本解析。
+- [v2.0] 图像截取：增加对文档内图像的提取与本地保存功能。
+- [v3.0] 图文混排：将提取的图像转换为 Markdown 格式的 URL ( ![Image](path) ) 并无缝插入文本流，保留原始排版上下文。
+- [v4.0] 精准页码追踪：通过全局偏移量映射（Offset Mapping）结合 LangChain 切分器，完美解决跨页 Chunking 导致页码元数据丢失的技术难题。
+"""
+
 import glob
 import os
-import fitz  # 直接使用底层引擎
+import fitz  # PyMuPDF 底层引擎，性能优异
 import re
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -8,7 +19,14 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 def process_chemistry_pdf(pdf_path: str, image_output_dir: str) -> list[Document]:
     """
-    进化版：图文双提的化学 PDF 处理器
+    解析单个 PDF 文件，提取图文信息，并返回带有精确页码元数据的文本块 (Chunks)。
+
+    Args:
+        pdf_path (str): PDF 文件的绝对或相对路径。
+        image_output_dir (str): 提取出的图片保存目录。
+
+    Returns:
+        list[Document]: LangChain 标准格式的 Document 列表，每个块附带精确的 metadata。
     """
     if not os.path.isfile(pdf_path):
         print(f"❌ 错误: 文件 {pdf_path} 不存在！")
@@ -17,69 +35,125 @@ def process_chemistry_pdf(pdf_path: str, image_output_dir: str) -> list[Document
     if not os.path.exists(image_output_dir):
         os.makedirs(image_output_dir)
 
-    print(f"📄 正在加载并双提 PDF: {pdf_path}")
-
-    # 1. 破局核心：直接用 fitz 打开文档，彻底掌控全局
     doc = fitz.open(pdf_path)
-    print(f"✅ 加载完成，共读取了 {len(doc)} 页。")
 
     full_text = ""
-    img_count = 0
-    pdf_filename = os.path.basename(pdf_path).replace('.pdf', '')  # 提取文件名用于图片命名
+    total_img_count = 0
+    pdf_filename = os.path.basename(pdf_path).replace('.pdf', '')
 
-    # 2. 遍历每一页：左手拿文本，右手拿图片
+    # 核心映射表：用于记录每一页文本在全局 full_text 字符串中的字符起止索引
+    page_mapping = []
+
     for i in range(len(doc)):
         page = doc[i]
+        page_elements = []
+        page_text = ""
 
-        # --- [左手：提取并清洗文本] ---
-        content = page.get_text("text")
-        # 清理中文空格
-        clean_content = re.sub(r'(?<=[\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])', '', content)
-        # 清理硬换行
-        clean_content = re.sub(r'(?<!\n)\n(?!\n)', ' ', clean_content)
-        full_text += clean_content + " "
+        # ==========================================
+        # 步骤 1: 提取页面元素并按物理坐标排序，还原阅读顺序
+        # ==========================================
+        for block in page.get_text("blocks"):
+            if block[6] == 0:  # 0 表示文本块
+                page_elements.append({"type": "text", "y0": block[1], "x0": block[0], "content": block[4]})
 
-        # --- [右手：提取并保存图片] ---
-        image_list = page.get_images(full=True)
-        for img_index, img in enumerate(image_list):
-            xref = img[0]
-            base_image = doc.extract_image(xref)
-            image_bytes = base_image["image"]
-            image_ext = base_image["ext"]
+        for img_info in page.get_image_info(xrefs=True):
+            page_elements.append(
+                {"type": "image", "y0": img_info["bbox"][1], "x0": img_info["bbox"][0], "xref": img_info["xref"]}
+            )
 
-            # 保存图片 (加上原 PDF 的名字，防止多篇文献图片同名覆盖)
-            image_name = f"{pdf_filename}_page{i + 1}_img{img_index}.{image_ext}"
-            with open(os.path.join(image_output_dir, image_name), "wb") as f:
-                f.write(image_bytes)
-            img_count += 1
+        # 按照 Y 坐标主导、X 坐标辅助进行排序 (从上到下，从左到右)
+        page_elements.sort(key=lambda e: (e["y0"], e["x0"]))
+
+        # ==========================================
+        # 步骤 2: 拼接单页图文内容 (Markdown 化)
+        # ==========================================
+        for elem in page_elements:
+            if elem["type"] == "text":
+                content = elem["content"]
+                # 数据清洗：消除 PDF 提取时中文之间的多余空格，并处理异常换行
+                clean_content = re.sub(r'(?<=[\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])', '', content)
+                clean_content = re.sub(r'(?<!\n)\n(?!\n)', ' ', clean_content)
+                page_text += clean_content + " "
+            elif elem["type"] == "image":
+                try:
+                    base_image = doc.extract_image(elem["xref"])
+                    if not base_image: continue
+                    image_bytes, image_ext = base_image["image"], base_image["ext"]
+                except Exception:
+                    continue
+
+                # 动态生成图片名并持久化
+                image_name = f"{pdf_filename}_page{i + 1}_img{total_img_count}.{image_ext}"
+                image_path = os.path.join(image_output_dir, image_name)
+                with open(image_path, "wb") as f:
+                    f.write(image_bytes)
+
+                total_img_count += 1
+                # 将图片占位符作为 Markdown 插入文本，实现多模态信息的对齐
+                page_text += f"\n\n![Image]({image_path})\n\n"
+
+        # ==========================================
+        # 步骤 3: 记录全局索引，构建页码映射花名册
+        # ==========================================
+        start_index = len(full_text)
+        full_text += page_text + " "  # 将单页内容追加到全局上下文
+        end_index = len(full_text)
+
+        # 登记该页在全局文本流中的势力范围
+        page_mapping.append({
+            "page_num": i + 1,
+            "start": start_index,
+            "end": end_index
+        })
 
     doc.close()
-    print(f"🖼️ 提取完成！共截获了 {img_count} 张核心图表。")
 
-    # 3. 把洗干净的纯文本，伪装成 LangChain 的 Document 对象
-    # 这里我们把提取到的图片数量也偷偷塞进 metadata 里，方便以后做统计
+    # 将全文伪装成单个 LangChain Document，准备进行全局切分
     single_doc = [Document(
         page_content=full_text,
-        metadata={
-            "source": pdf_path,
-            "extracted_images_count": img_count
-        }
+        metadata={"source": pdf_path, "pdf_filename": pdf_filename}
     )]
 
-    # 4. 文本切分 (保持你原本优秀的中文策略)
+    # ==========================================
+    # 步骤 4: 带有坐标感知的递归字符切分
+    # ==========================================
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
         chunk_overlap=50,
         separators=["\n\n", "。", "，", "！", ",", "!", ". ", " ", "", "？", "\n"],
-        keep_separator=True
+        keep_separator=True,
+        add_start_index=True  # 关键参数：保留每个 chunk 在原始长文本中的绝对起始位置
     )
 
     chunks = text_splitter.split_documents(single_doc)
-    print(f"✂️ 分割完成，共生成了 {len(chunks)} 个文本块。")
+
+    # ==========================================
+    # 步骤 5: 元数据找回 (解决跨页 Chunk 的页码归属问题)
+    # ==========================================
+    for chunk in chunks:
+        chunk_start = chunk.metadata.get("start_index", 0)
+
+        # 利用二分法或顺序遍历，根据绝对索引反查对应的页码
+        for pm in page_mapping:
+            if pm["start"] <= chunk_start < pm["end"]:
+                chunk.metadata["page"] = pm["page_num"]
+                break
+
+    print(f"✂️ [{pdf_filename}] 分割完成，共生成 {len(chunks)} 个携带精确页码的文本块。")
     return chunks
 
 
-def process_muti_pdf(folder_path: str, image_output_dir: str = "data/extracted_images") -> list[Document]:
+def process_multi_pdf(folder_path: str, image_output_dir: str = "data/extracted_images") -> list[Document]:
+    """
+    批量处理文件夹下的所有 PDF 文件。
+
+    Args:
+        folder_path (str): 存放 PDF 的目标文件夹路径。
+        image_output_dir (str): 提取图片的统一存放路径。
+
+    Returns:
+        list[Document]: 包含所有 PDF 解析结果的 Document 列表。
+    """
     all_chunks = []
     search_pattern = os.path.join(folder_path, "*.pdf")
     pdf_files = glob.glob(search_pattern)
@@ -87,17 +161,17 @@ def process_muti_pdf(folder_path: str, image_output_dir: str = "data/extracted_i
 
     for pdf_file in pdf_files:
         try:
-            # 修复了这里的传参问题，加上了图片输出路径
             chunks = process_chemistry_pdf(pdf_file, image_output_dir)
             all_chunks.extend(chunks)
         except Exception as e:
             print(f"❌ 处理文件 {pdf_file} 时发生错误: {e}")
             continue
 
-    print(f"🎉 所有处理完成！系统总共接管了 {len(all_chunks)} 个文本块。")
+    print(f"🎉 批处理完成！系统总共生成了 {len(all_chunks)} 个高质量图文文本块。")
     return all_chunks
 
 
 if __name__ == "__main__":
-    # 假设你的 PDF 放在 data/pdf 目录下，图片想存到 data/extracted_images
-    final_chunks = process_muti_pdf("data/pdf", "data/extracted_images")
+    # 示例执行入口
+    # 确保本地存在 data/pdf 目录并放入测试文件
+    final_chunks = process_multi_pdf("data/pdf", "data/extracted_images")
