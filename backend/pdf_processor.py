@@ -130,14 +130,23 @@ def process_chemistry_pdf(pdf_path: str, image_output_dir: str) -> list[Document
     # ==========================================
     # 步骤 5: 元数据找回 (解决跨页 Chunk 的页码归属问题)
     # ==========================================
+    age_idx = 0
+    total_pages = len(page_mapping)
+
     for chunk in chunks:
         chunk_start = chunk.metadata.get("start_index", 0)
 
-        # 利用二分法或顺序遍历，根据绝对索引反查对应的页码
-        for pm in page_mapping:
-            if pm["start"] <= chunk_start < pm["end"]:
-                chunk.metadata["page"] = pm["page_num"]
-                break
+        # 【核心逻辑】：只要当前 chunk 的起始位置已经超过了当前页的管辖范围 (end)，
+        # 页面指针就果断向后移动，绝不回头！
+        while page_idx < total_pages and chunk_start >= page_mapping[page_idx]["end"]:
+            page_idx += 1
+
+        # 安全赋值与防御性边界处理
+        if page_idx < total_pages:
+            chunk.metadata["page"] = page_mapping[page_idx]["page_num"]
+        else:
+            # 应对极端的越界脏数据，兜底为最后一页或默认页
+            chunk.metadata["page"] = page_mapping[-1]["page_num"] if page_mapping else 1
 
     print(f"✂️ [{pdf_filename}] 分割完成，共生成 {len(chunks)} 个携带精确页码的文本块。")
     return chunks
