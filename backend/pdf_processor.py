@@ -90,7 +90,7 @@ def process_chemistry_pdf(pdf_path: str, image_output_dir: str) -> list[Document
 
                 total_img_count += 1
                 # 将图片占位符作为 Markdown 插入文本，实现多模态信息的对齐
-                page_text += f"\n\n![Image]({image_path})\n\n"
+                page_text += f"此处有图片![Image]({image_path})"
 
         # ==========================================
         # 步骤 3: 记录全局索引，构建页码映射花名册
@@ -130,7 +130,7 @@ def process_chemistry_pdf(pdf_path: str, image_output_dir: str) -> list[Document
     # ==========================================
     # 步骤 5: 元数据找回 (解决跨页 Chunk 的页码归属问题)
     # ==========================================
-    age_idx = 0
+    page_idx = 0
     total_pages = len(page_mapping)
 
     for chunk in chunks:
@@ -184,3 +184,4 @@ if __name__ == "__main__":
     # 示例执行入口
     # 确保本地存在 data/pdf 目录并放入测试文件
     final_chunks = process_multi_pdf("data/pdf", "data/extracted_images")
+
