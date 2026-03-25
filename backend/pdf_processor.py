@@ -152,7 +152,7 @@ def process_chemistry_pdf(pdf_path: str, image_output_dir: str) -> list[Document
     return chunks
 
 
-def process_multi_pdf(folder_path: str, image_output_dir: str = "data/extracted_images") -> list[Document]:
+def process_multi_pdf(folder_path: str, image_output_dir: str = "../data/extracted_images") -> list[Document]:
     """
     批量处理文件夹下的所有 PDF 文件。
 

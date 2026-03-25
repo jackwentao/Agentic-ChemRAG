@@ -14,7 +14,7 @@ def get_reranked_retriever():
 
     # 1. 挂载本地数据库
     chroma_db = Chroma(
-        persist_directory="data/chroma_db",
+        persist_directory="../data/chroma_db",
         embedding_function=embedding
     )
 

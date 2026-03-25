@@ -15,7 +15,7 @@ def build_chroma_persist_db(chunks):
     chromadb = Chroma.from_documents(
         documents=chunks,
         embedding=embedding,
-        persist_directory="data/chroma_db",
+        persist_directory="../data/chroma_db",
         collection_metadata={"hnsw:space": "cosine"}
     )
     print("✅ 数据库构建完成！")
