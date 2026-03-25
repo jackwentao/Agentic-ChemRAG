@@ -75,3 +75,18 @@
 - [ ] **多模态智能体扩展 (Multimodal Agent):** 对接 Qwen-VL 等视觉大模型，深度解析本地谱图，实现“以文找图”和图表 QA。
 - [ ] **外部知识图谱融合 (Function Calling):** 编写自定义 Tool 接入 PubChem 等外部 API，自动路由理化常数查询。
 - [ ] **高并发推理加速架构:** 结合 vLLM 推理框架的 PagedAttention 机制，并引入 Redis 作为 Semantic Cache（语义缓存），优化 QPS 表现。
+
+---
+## 🖥️ 系统运行演示 (System Demo)
+
+**1. 极简极客风聊天主界面**
+![主界面展示](./assets/demo.png)
+
+**2. 多模态精准图文解析渲染**
+![图文混排展示](./assets/demo-chat.png)
+![图文混排展示](./assets/demo-image-render.png)
+
+**3. 工业级多轮记忆管理与精准溯源跳转**
+![多轮记忆](./assets/demo-continue-chat.png)
+![精准溯源](./assets/demo-jump1.png)
+![精准溯源](./assets/demo-jump2.png)
