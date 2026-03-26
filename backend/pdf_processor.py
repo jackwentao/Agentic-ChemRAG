@@ -7,6 +7,7 @@ PDF Multi-Modal Document Parser & Chunker (PDF多模态文档解析与切分器)
 - [v2.0] 图像截取：增加对文档内图像的提取与本地保存功能。
 - [v3.0] 图文混排：将提取的图像转换为 Markdown 格式的 URL ( ![Image](path) ) 并无缝插入文本流，保留原始排版上下文。
 - [v4.0] 精准页码追踪：通过全局偏移量映射（Offset Mapping）结合 LangChain 切分器，完美解决跨页 Chunking 导致页码元数据丢失的技术难题。
+- [v5.0] 工业级图像清洗：重构底层 Pixmap 渲染逻辑，实现像素级色彩空间强转（修复 CMYK 色彩畸变）与 Alpha Blending 透明度混合（动态白底注入）。彻底解决了前端网页（尤其在暗黑模式下）展示图表时的黑图/隐形问题，同时也为未来平滑升级多模态 VLM (视觉大模型) 读图推理做好了底层数据标准化的准备。
 """
 
 import glob
@@ -76,17 +77,51 @@ def process_chemistry_pdf(pdf_path: str, image_output_dir: str) -> list[Document
                 page_text += clean_content + " "
             elif elem["type"] == "image":
                 try:
-                    base_image = doc.extract_image(elem["xref"])
-                    if not base_image: continue
-                    image_bytes, image_ext = base_image["image"], base_image["ext"]
+                    # 传统原始字节提取方法,有的图片会被渲染为黑色
+                    # base_image = doc.extract_image(elem["xref"])
+                    # if not base_image: continue
+                    # image_bytes, image_ext = base_image["image"], base_image["ext"]
+                    # 1. 取出原始图像的矩阵包裹
+                    pix = fitz.Pixmap(doc, elem["xref"])
+
+                    # ==========================================
+                    # 💥 终极防线：色彩空间与透明通道的“分诊治疗”
+                    # ==========================================
+
+                    # 症状 A：带有透明通道 (Alpha)，可能导致 AI 视觉模型把背景识别为纯黑
+                    if pix.alpha:
+                        # 第一步：准备一张和原图大小完全一样的“纯白画布”
+                        # 参数解释：fitz.csRGB 代表标准三通道 RGB，pix.irect 代表原图的宽高边界
+                        white_bg = fitz.Pixmap(fitz.csRGB, pix.irect)
+
+                        # 第二步：把画布刷成纯白色 (255 代表 R:255, G:255, B:255)
+                        white_bg.clear_with(255)
+
+                        # 第三步：坐标系对齐 (防止图贴歪了)
+                        white_bg.set_origin(pix.x, pix.y)
+
+                        # 第四步：盖章！把带有透明度的原图盖在白板上。
+                        # 底层 C 引擎会自动计算透明混合算法，原本透明的地方透出底下的白色
+                        white_bg.copy(pix, pix.irect)
+
+                        # 第五步：狸猫换太子，丢弃带透明度的旧图，使用白底新图
+                        pix = white_bg
+
+                    # 症状 B：没有透明通道，但色彩通道数 >= 4 (典型的如 CMYK 印刷图)
+                    elif pix.n >= 4:
+                        # 直接通过底层数学矩阵运算，强转为标准的 RGB
+                        pix = fitz.Pixmap(fitz.csRGB, pix)
+
+                    # ==========================================
                 except Exception:
                     continue
 
                 # 动态生成图片名并持久化
+                image_ext = "png"
                 image_name = f"{pdf_filename}_page{i + 1}_img{total_img_count}.{image_ext}"
                 image_path = os.path.join(image_output_dir, image_name)
-                with open(image_path, "wb") as f:
-                    f.write(image_bytes)
+                pix.save(image_path)
+                pix = None
 
                 total_img_count += 1
                 # 将图片占位符作为 Markdown 插入文本，实现多模态信息的对齐
@@ -183,5 +218,5 @@ def process_multi_pdf(folder_path: str, image_output_dir: str = "../data/extract
 if __name__ == "__main__":
     # 示例执行入口
     # 确保本地存在 data/pdf 目录并放入测试文件
-    final_chunks = process_multi_pdf("data/pdf", "data/extracted_images")
+    final_chunks = process_multi_pdf("../data/pdf", "../data/extracted_images")
 
