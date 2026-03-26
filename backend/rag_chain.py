@@ -65,16 +65,29 @@ def get_rag_chain():
     # TODO 回答问题链路
     # 使模型结构化输出
     answer_llm = ChatDeepSeek(model="deepseek-chat").with_structured_output(ChemResponse)
-    answer_prompt = ChatPromptTemplate.from_template("""
-    你是一个极其严谨的材料化学专家。请严格根据以下检索到的资料回答用户问题。
-    你必须提取出所有相关的图片路径、来源文件名和页码，并按要求的结构输出。
-    如果资料完全无关，将 answer 字段填为“无相关资料，无法回答”。
+    # 采用工业级 ChatML 格式，严格区分“系统纪律”、“上下文记忆”和“用户诉求”
+    answer_prompt = ChatPromptTemplate.from_messages([
+        # 👑 1. System 角色 (最高指令层)：确立人设、铁律和知识库
+        # 无论用户怎么使坏，模型都会死守这一层的规则
+        ("system", """你是一个极其严谨的材料化学专家。
+    你的唯一任务是：严格根据下方【检索到的资料】来回答问题。
+
+    【强制执行的铁律】：
+    1. 必须精准提取出资料中所有相关的图片路径（Markdown格式）、来源文件名和页码。
+    2. 必须按要求的结构输出（或严格遵守用户指定的 JSON/格式要求）。
+    3. 绝不能捏造数据。如果【检索到的资料】完全无法回答问题，你必须将 answer 字段直接填为：“无相关资料，无法回答”。
+
     【检索到的资料】：
     {retriever}
+    """),
 
-    【用户问题】：
-    {question}
-    """)
+        # 🧠 2. 记忆占位符 (预留扩展层)：为了未来 5 分钟内能快速升级为 Agent 做准备
+        # 如果将来你想让系统记住多轮对话，只需传入 chat_history 变量，它就会自动在这里展开
+        # MessagesPlaceholder(variable_name="chat_history", optional=True),
+
+        # 👤 3. Human 角色 (操作执行层)：用户当下的具体问题
+        ("human", "{question}")
+    ])
     retriever = get_reranked_retriever()
     # answer_chain = [retriever,question] | answer_prompt | answer_llm
 
