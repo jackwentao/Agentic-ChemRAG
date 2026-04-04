@@ -1,14 +1,15 @@
 from operator import itemgetter
 from typing import List
+import re
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_deepseek import ChatDeepSeek
 from pydantic import BaseModel
 from pydantic import Field
 from config import ANSWER_MODEL, REWRITE_MODEL
-from retriever_engine import get_reranked_retriever
+from retriever_engine import get_reranked_retriever, get_similarity_retriever
 
 
 # 明确告诉前端：我会传给你一张图的路径和描述
@@ -36,6 +37,75 @@ def format_docs(docs):
         f"内容：{doc.page_content}\n页码：{doc.metadata.get('page', '未知')}\n文件名：{doc.metadata.get('source', '未知')}"
         for doc in docs
     )
+
+
+def _retrieve_with_fallback(query: str):
+    """优先使用精排检索；若无结果则回退到基础相似度检索。"""
+    primary_docs = get_reranked_retriever().invoke(query)
+    if primary_docs:
+        return primary_docs
+    return get_similarity_retriever().invoke(query)
+
+
+def _doc_to_source(doc) -> SourceInfo:
+    source = str(doc.metadata.get("source", "未知"))
+    page = str(doc.metadata.get("page", "未知"))
+    return SourceInfo(file_name=source, page=page)
+
+
+def _extract_images_from_docs(docs) -> List[ImageInfo]:
+    images: List[ImageInfo] = []
+    for doc in docs:
+        page = str(doc.metadata.get("page", "未知"))
+        for match in re.findall(r"!\[Image\]\(([^)]+)\)", doc.page_content or ""):
+            images.append(ImageInfo(image_path=match, image_desc=f"相关图片（第{page}页）"))
+            if len(images) >= 6:
+                return images
+    return images
+
+
+def _build_fallback_answer(docs) -> str:
+    snippets = []
+    for doc in docs[:3]:
+        text = re.sub(r"!\[Image\]\(([^)]+)\)", "", doc.page_content or "")
+        text = re.sub(r"\s+", " ", text).strip()
+        if text:
+            snippets.append(text[:180])
+    if not snippets:
+        return "无相关资料，无法回答"
+    return "根据检索资料可得：" + "；".join(snippets)
+
+
+def _finalize_response(payload: dict) -> ChemResponse:
+    docs = payload.get("retrieved_docs") or []
+    model_response: ChemResponse = payload["model_response"]
+
+    answer = (model_response.answer or "").strip()
+    sources = model_response.sources or []
+    images = model_response.images or []
+
+    if not sources and docs:
+        # 补齐来源，避免前端无可点击参考
+        seen = set()
+        deduped_sources = []
+        for doc in docs:
+            src = _doc_to_source(doc)
+            key = (src.file_name, src.page)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped_sources.append(src)
+            if len(deduped_sources) >= 8:
+                break
+        sources = deduped_sources
+
+    if not images and docs:
+        images = _extract_images_from_docs(docs)
+
+    if answer == "无相关资料，无法回答" and docs:
+        answer = _build_fallback_answer(docs)
+
+    return ChemResponse(answer=answer or "无相关资料，无法回答", images=images, sources=sources)
 
 
 def get_rag_chain():
@@ -89,7 +159,7 @@ def get_rag_chain():
         # 👤 3. Human 角色 (操作执行层)：用户当下的具体问题
         ("human", "{question}")
     ])
-    retriever = get_reranked_retriever()
+    retriever = RunnableLambda(_retrieve_with_fallback)
     # answer_chain = [retriever,question] | answer_prompt | answer_llm
 
     # TODO 构建完整链路
@@ -98,12 +168,17 @@ def get_rag_chain():
             RunnablePassthrough.assign(
                 standalone_question=rewrite_chain
             )
-            | {
-                # 2. 检索与询问
-                "retriever": itemgetter("standalone_question") | retriever | format_docs,
-                "question": itemgetter("standalone_question")
-            }
-            | answer_prompt | answer_llm
+            | RunnablePassthrough.assign(
+                retrieved_docs=itemgetter("standalone_question") | retriever
+            )
+            | RunnablePassthrough.assign(
+                retriever=itemgetter("retrieved_docs") | RunnableLambda(format_docs),
+                question=itemgetter("standalone_question")
+            )
+            | RunnablePassthrough.assign(
+                model_response=answer_prompt | answer_llm
+            )
+            | RunnableLambda(_finalize_response)
     )
     return chain
 

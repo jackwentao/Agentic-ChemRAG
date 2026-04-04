@@ -12,6 +12,24 @@ const buildUrl = (baseUrl: string, relativePath: string) => {
   return baseUrl ? `${baseUrl}/${cleanPath}` : `/${cleanPath}`;
 };
 
+const normalizeDataRelativePath = (rawPath: string) => {
+  const normalized = rawPath.replace(/\\/g, '/');
+  if (normalized.includes('/data/')) {
+    return normalized.split('/data/')[1].replace(/^\/+/, '');
+  }
+  if (normalized.startsWith('data/')) {
+    return normalized.slice('data/'.length);
+  }
+  return normalized.replace(/^\/+/, '');
+};
+
+const toDataAssetUrl = (path: string) => {
+  const relative = normalizeDataRelativePath(path);
+  return buildUrl(DATA_ROOT_URL, relative);
+};
+
+const isProgressChunk = (text: string) => /^正在检索\.{0,3}$/.test(text);
+
 const toPdfUrl = (fileName: string) => {
   const cleanName = fileName.split(/[\\/]/).pop() || fileName;
   return buildUrl(DATA_ROOT_URL, `pdf/${encodeURIComponent(cleanName)}`);
@@ -117,7 +135,8 @@ function App() {
             return msg;
           }
 
-          const nextText = (msg.text || '') + chunk;
+          const baseText = isProgressChunk(msg.text || '') ? '' : (msg.text || '');
+          const nextText = baseText + chunk;
           return {
             ...msg,
             text: nextText,
@@ -134,15 +153,17 @@ function App() {
           if (msg.id !== assistantMessageId) {
             return msg;
           }
+          const safeText = isProgressChunk(msg.text || '') ? '' : (msg.text || '');
+          const mergedAnswer = finalAnswer || safeText || '未生成有效回答';
           return {
             ...msg,
             isStreaming: false,
             response: {
-              answer: finalAnswer || msg.text,
+              answer: mergedAnswer,
               images,
               sources,
             },
-            text: finalAnswer || msg.text,
+            text: mergedAnswer,
           };
         }));
       };
@@ -162,7 +183,23 @@ function App() {
         }
 
         if (payload.type === 'chunk') {
-          appendChunk(payload.content || '');
+          const chunk = payload.content || '';
+          if (isProgressChunk(chunk)) {
+            setMessages(prev => prev.map(msg => {
+              if (msg.id !== assistantMessageId) {
+                return msg;
+              }
+              if (msg.text && !isProgressChunk(msg.text)) {
+                return msg;
+              }
+              return {
+                ...msg,
+                text: chunk,
+              };
+            }));
+            return;
+          }
+          appendChunk(chunk);
         }
 
         if (payload.type === 'end') {
@@ -271,7 +308,7 @@ function App() {
                                 <div key={index} className="image-card">
                                   <div className="image-container">
                                     <img
-                                      src={buildUrl(DATA_BASE_URL, img.image_path)}
+                                      src={toDataAssetUrl(img.image_path)}
                                       alt={img.image_desc}
                                       onError={(e) => {
                                         (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Image+Not+Found';

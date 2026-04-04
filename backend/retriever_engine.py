@@ -62,3 +62,11 @@ def get_reranked_retriever():
         base_retriever=base_retriever
     )
     return advanced_retriever
+
+
+def get_similarity_retriever():
+    """回退检索器：不做阈值过滤，保证最少返回 K 条候选。"""
+    return _get_chroma_db().as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": RETRIEVAL_K}
+    )

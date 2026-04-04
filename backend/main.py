@@ -60,7 +60,13 @@ class ChatRequest(BaseModel):
 def _normalize_result_paths(result):
     # 统一路径分隔符，避免 Windows 反斜杠影响前端 URL
     for img in result.images:
-        img.image_path = img.image_path.replace("\\", "/")
+        path = img.image_path.replace("\\", "/")
+        # 前端统一从 /data 挂载读取，保证路径始终是 data/... 相对路径
+        if "/data/" in path:
+            path = "data/" + path.split("/data/", 1)[1]
+        elif path.startswith("extracted_images/"):
+            path = "data/" + path
+        img.image_path = path
 
     for src in result.sources:
         src.file_name = src.file_name.replace("\\", "/")
@@ -89,6 +95,11 @@ def _chunk_text(text: str, chunk_size: int = 8):
         return
     for i in range(0, len(text), chunk_size):
         yield text[i:i + chunk_size]
+
+
+def _typing_progress_chunk(tick: int) -> str:
+    phases = ["正在检索", "正在检索.", "正在检索..", "正在检索..."]
+    return phases[tick % len(phases)]
 
 
 # ==========================================
@@ -127,10 +138,19 @@ async def chat_stream_endpoint(request: ChatRequest):
         try:
             yield _sse_payload({"type": "start"})
 
-            result = await asyncio.to_thread(_get_rag_chain().invoke, {
+            invoke_task = asyncio.create_task(asyncio.to_thread(_get_rag_chain().invoke, {
                 "question": question,
                 "chat_history": chat_history
-            })
+            }))
+
+            tick = 0
+            while not invoke_task.done():
+                # 先给前端连续增量，避免用户体感“无流式”
+                yield _sse_payload({"type": "chunk", "content": _typing_progress_chunk(tick)})
+                tick += 1
+                await asyncio.sleep(0.35)
+
+            result = await invoke_task
 
             _normalize_result_paths(result)
 
