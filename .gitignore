@@ -1,6 +1,9 @@
-# OS and editor
+# =========================
+# OS / Editor
+# =========================
 .DS_Store
 Thumbs.db
+Desktop.ini
 .idea/
 .vscode/
 .claude/
@@ -8,42 +11,87 @@ Thumbs.db
 *.swo
 *~
 
-# Python
+# =========================
+# Python runtime
+# =========================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.so
 .Python
+
+# Virtual environments
 .venv/
 venv/
 env/
 ENV/
 
-# Environment files
+# Test / coverage / type-check
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# =========================
+# Environment / secrets
+# =========================
 .env
 .env.local
 .env.*.local
+.envrc
+*.pem
+*.key
+*.crt
+*.p12
 
-# Logs
-logs/
-*.log
+# Keep template configuration tracked
+!.env.example
+
+# =========================
+# Node / frontend
+# =========================
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+.npm/
+
+# JS logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Frontend artifacts
-frontend/node_modules/
-frontend/dist/
-frontend/dist-ssr/
+# =========================
+# Logs / temp / local notes
+# =========================
+logs/
+*.log
+*.tmp
+*.bak
+*.pid
+计划
+计划.txt
 
+# =========================
 # Local data artifacts (rebuild locally)
+# =========================
 data/chroma_db/
 data/pdf/
 data/extracted_images/
 
-# Local notes and temp files
-计划.txt
-*.tmp
-*.bak
+# Integration generated artifacts
+tests/results/

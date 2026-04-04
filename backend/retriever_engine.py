@@ -13,16 +13,38 @@ from langchain_classic.retrievers import ContextualCompressionRetriever
 from langchain_classic.retrievers.document_compressors import CrossEncoderReranker
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 from langchain_huggingface import HuggingFaceEmbeddings
-# 加载 embedding 模型
-_embedding_model = HuggingFaceEmbeddings(model_name="BAAI/bge-small-zh-v1.5", encode_kwargs={'normalize_embeddings': True})
+from config import CHROMA_DIR, EMBEDDING_MODEL, RERANKER_MODEL, RERANK_TOP_N, RETRIEVAL_K, RETRIEVAL_SCORE_THRESHOLD
 
-# 挂载本地数据库
-_chroma_db = Chroma(
-    persist_directory="../data/chroma_db",
-    embedding_function=_embedding_model,
-)
+_embedding_model = None
+_chroma_db = None
+_cross_encoder = None
 
-_cross_encoder = HuggingFaceCrossEncoder(model_name="BAAI/bge-reranker-v2-m3")
+
+def _get_embedding_model():
+    global _embedding_model
+    if _embedding_model is None:
+        _embedding_model = HuggingFaceEmbeddings(
+            model_name=EMBEDDING_MODEL,
+            encode_kwargs={"normalize_embeddings": True},
+        )
+    return _embedding_model
+
+
+def _get_chroma_db():
+    global _chroma_db
+    if _chroma_db is None:
+        _chroma_db = Chroma(
+            persist_directory=str(CHROMA_DIR),
+            embedding_function=_get_embedding_model(),
+        )
+    return _chroma_db
+
+
+def _get_cross_encoder():
+    global _cross_encoder
+    if _cross_encoder is None:
+        _cross_encoder = HuggingFaceCrossEncoder(model_name=RERANKER_MODEL)
+    return _cross_encoder
 
 
 def get_reranked_retriever():
@@ -30,11 +52,11 @@ def get_reranked_retriever():
     构建双阶段检索器: 召回 (Top-10 且达标) -> 重排 (Top-3)
     :return: 带有精排功能的高级检索器
     """
-    base_retriever = _chroma_db.as_retriever(
+    base_retriever = _get_chroma_db().as_retriever(
         search_type="similarity_score_threshold",
-        search_kwargs={"k": 10, "score_threshold": 0.5}
+        search_kwargs={"k": RETRIEVAL_K, "score_threshold": RETRIEVAL_SCORE_THRESHOLD}
     )
-    reranker = CrossEncoderReranker(model=_cross_encoder, top_n=3)
+    reranker = CrossEncoderReranker(model=_get_cross_encoder(), top_n=RERANK_TOP_N)
     advanced_retriever = ContextualCompressionRetriever(
         base_compressor=reranker,
         base_retriever=base_retriever

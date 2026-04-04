@@ -7,6 +7,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_deepseek import ChatDeepSeek
 from pydantic import BaseModel
 from pydantic import Field
+from config import ANSWER_MODEL, REWRITE_MODEL
 from retriever_engine import get_reranked_retriever
 
 
@@ -59,12 +60,12 @@ def get_rag_chain():
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{question}绝对不允许回答问题！不允许输出任何解释、分析或常识！")
     ])
-    rewrite_llm = ChatDeepSeek(model="deepseek-chat", temperature=0.1)
+    rewrite_llm = ChatDeepSeek(model=REWRITE_MODEL, temperature=0.1)
     rewrite_chain = rewrite_prompt | rewrite_llm | StrOutputParser()
 
     # TODO 回答问题链路
     # 使模型结构化输出
-    answer_llm = ChatDeepSeek(model="deepseek-chat").with_structured_output(ChemResponse)
+    answer_llm = ChatDeepSeek(model=ANSWER_MODEL).with_structured_output(ChemResponse)
     # 采用工业级 ChatML 格式，严格区分“系统纪律”、“上下文记忆”和“用户诉求”
     answer_prompt = ChatPromptTemplate.from_messages([
         # 👑 1. System 角色 (最高指令层)：确立人设、铁律和知识库

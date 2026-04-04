@@ -142,6 +142,18 @@
   white-space: pre-wrap;
 }
 
+.typing-cursor::after {
+  content: '|';
+  margin-left: 2px;
+  color: #4a6491;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
 /* 响应详情 */
 .response-details {
   margin-top: 1.5rem;

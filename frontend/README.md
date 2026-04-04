@@ -1,73 +1,76 @@
-# React + TypeScript + Vite
+# 前端开发文档
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+前端工程基于 React + TypeScript + Vite，负责聊天交互、流式渲染、图片与引用展示。
 
-Currently, two official plugins are available:
+## 1. 启动方式
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```powershell
+cd frontend
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+默认地址：http://localhost:5173
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## 2. 与后端的接口契约
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### 请求入口
+
+- 非流式：POST /api/chat
+- 流式：POST /api/chat/stream
+
+### 流式事件
+
+- start：流开始
+- chunk：文本增量
+- end：最终结果（包含 answer/images/sources）
+- error：异常事件
+
+说明：前端 SSE 解析逻辑与后端事件结构必须同轮变更。
+
+## 3. 环境变量
+
+前端通过根目录 .env 获取联调配置：
+
+- FRONTEND_PORT
+- BACKEND_ORIGIN
+- VITE_API_BASE_URL
+- VITE_DATA_BASE_URL
+
+其中代理与端口由 vite.config.ts 统一读取。
+
+## 4. 常用命令
+
+```powershell
+npm run dev
+npm run build
+npm run preview
 ```
+
+## 5. 关键文件说明
+
+- src/App.tsx：消息状态、SSE 解析、内容渲染
+- src/App.css：布局、消息样式、流式光标动画
+- vite.config.ts：端口与代理配置
+
+## 6. 质量门禁
+
+- 变更前后需保证 npm run build 通过
+- 与后端联调至少跑一轮集成测试
+- 文档更新需反映接口或配置变化
+
+## 7. 常见问题
+
+### 页面可打开但无回答
+
+- 检查后端服务是否可访问
+- 检查 /api/chat/stream 是否返回 start/chunk/end
+
+### 图片链接打不开
+
+- 检查 VITE_DATA_BASE_URL
+- 检查后端 /data 静态目录挂载和路径分隔符
+
+### 构建时报 node 类型错误
+
+- 确认已安装 @types/node

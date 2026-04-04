@@ -9,6 +9,7 @@ Agentic-ChemRAG Vector Database Builder (向量数据库构建引擎)
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from pdf_processor import process_multi_pdf
+from config import CHROMA_DIR, EMBEDDING_MODEL, IMAGE_DIR, PDF_DIR
 
 
 def build_chroma_persist_db(chunks):
@@ -18,13 +19,13 @@ def build_chroma_persist_db(chunks):
     :return: Chroma 向量数据库实例
     """
     print("⏳ [1/2] 正在加载 BGE 向量模型...")
-    embedding = HuggingFaceEmbeddings(model_name="BAAI/bge-small-zh-v1.5", encode_kwargs={'normalize_embeddings': True})
+    embedding = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL, encode_kwargs={'normalize_embeddings': True})
 
     print("🗄️ [2/2] 正在构建并持久化 Chroma 数据库 (空间法则: ip)...")
     chromadb = Chroma.from_documents(
         documents=chunks,
         embedding=embedding,
-        persist_directory="../data/chroma_db",
+        persist_directory=str(CHROMA_DIR),
         collection_metadata={"hnsw:space": "ip"}
     )
     print("✅ 数据库构建完成！")
@@ -32,6 +33,6 @@ def build_chroma_persist_db(chunks):
 
 
 if __name__ == "__main__":
-    all_chunks = process_multi_pdf("../data/pdf", "../data/extracted_images")
+    all_chunks = process_multi_pdf(str(PDF_DIR), str(IMAGE_DIR))
     build_chroma_persist_db(all_chunks)
 

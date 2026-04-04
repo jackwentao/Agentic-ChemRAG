@@ -1,6 +1,26 @@
 import { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
 import './App.css';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? '';
+const DATA_BASE_URL = import.meta.env.VITE_DATA_BASE_URL?.replace(/\/$/, '') ?? API_BASE_URL;
+const DATA_ROOT_URL = DATA_BASE_URL
+  ? (DATA_BASE_URL.endsWith('/data') ? DATA_BASE_URL : `${DATA_BASE_URL}/data`)
+  : '/data';
+
+const buildUrl = (baseUrl: string, relativePath: string) => {
+  const cleanPath = relativePath.replace(/^\/+/, '');
+  return baseUrl ? `${baseUrl}/${cleanPath}` : `/${cleanPath}`;
+};
+
+const toPdfUrl = (fileName: string) => {
+  const cleanName = fileName.split(/[\\/]/).pop() || fileName;
+  return buildUrl(DATA_ROOT_URL, `pdf/${encodeURIComponent(cleanName)}`);
+};
+
+const normalizePage = (page: string) => {
+  const match = String(page).match(/\d+/);
+  return match ? match[0] : '1';
+};
 
 // 定义类型接口
 interface ImageInfo {
@@ -23,6 +43,7 @@ interface Message {
   id: string;
   text: string;
   isUser: boolean;
+  isStreaming?: boolean;
   response?: ChatResponse;
 }
 
@@ -48,33 +69,158 @@ function App() {
       isUser: true,
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    const assistantMessageId = (Date.now() + 1).toString();
+    const assistantPlaceholder: Message = {
+      id: assistantMessageId,
+      text: '',
+      isUser: false,
+      isStreaming: true,
+      response: {
+        answer: '',
+        images: [],
+        sources: [],
+      },
+    };
+
+    setMessages(prev => [...prev, userMessage, assistantPlaceholder]);
     setLoading(true);
     const question = input;
     setInput('');
 
     try {
-      const response = await axios.post<ChatResponse>('/api/chat', {
-        session_id: sessionId,
-        question: question,
+      const response = await fetch(buildUrl(API_BASE_URL, 'api/chat/stream'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          question,
+        }),
       });
 
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: response.data.answer,
-        isUser: false,
-        response: response.data,
+      if (!response.ok || !response.body) {
+        throw new Error('流式响应失败');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      const appendChunk = (chunk: string) => {
+        if (!chunk) {
+          return;
+        }
+
+        setMessages(prev => prev.map(msg => {
+          if (msg.id !== assistantMessageId) {
+            return msg;
+          }
+
+          const nextText = (msg.text || '') + chunk;
+          return {
+            ...msg,
+            text: nextText,
+            response: {
+              ...(msg.response || { answer: '', images: [], sources: [] }),
+              answer: nextText,
+            },
+          };
+        }));
       };
 
-      setMessages(prev => [...prev, assistantMessage]);
+      const finishMessage = (images: ImageInfo[], sources: SourceInfo[], finalAnswer = '') => {
+        setMessages(prev => prev.map(msg => {
+          if (msg.id !== assistantMessageId) {
+            return msg;
+          }
+          return {
+            ...msg,
+            isStreaming: false,
+            response: {
+              answer: finalAnswer || msg.text,
+              images,
+              sources,
+            },
+            text: finalAnswer || msg.text,
+          };
+        }));
+      };
+
+      const parseSseEvent = (eventRaw: string) => {
+        const dataLine = eventRaw
+          .split('\n')
+          .find(line => line.startsWith('data: '));
+
+        if (!dataLine) {
+          return;
+        }
+
+        const payload = JSON.parse(dataLine.slice(6));
+        if (payload.type === 'start') {
+          return;
+        }
+
+        if (payload.type === 'chunk') {
+          appendChunk(payload.content || '');
+        }
+
+        if (payload.type === 'end') {
+          finishMessage(payload.images || [], payload.sources || [], payload.answer || '');
+        }
+
+        if (payload.type === 'error') {
+          setMessages(prev => prev.map(msg => {
+            if (msg.id !== assistantMessageId) {
+              return msg;
+            }
+            return {
+              ...msg,
+              isStreaming: false,
+              text: payload.error || '后端返回了错误。',
+              response: {
+                answer: payload.error || '后端返回了错误。',
+                images: [],
+                sources: [],
+              },
+            };
+          }));
+        }
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+
+        events.forEach(parseSseEvent);
+      }
+
+      if (buffer.trim()) {
+        parseSseEvent(buffer);
+      }
     } catch (error) {
       console.error('Error:', error);
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: '抱歉，发生错误。请检查后端服务是否运行。',
-        isUser: false,
-      };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prev => prev.map(msg => {
+        if (msg.id !== assistantMessageId) {
+          return msg;
+        }
+        return {
+          ...msg,
+          isStreaming: false,
+          text: '抱歉，发生错误。请检查后端服务是否运行。',
+          response: {
+            answer: '抱歉，发生错误。请检查后端服务是否运行。',
+            images: [],
+            sources: [],
+          },
+        };
+      }));
     } finally {
       setLoading(false);
     }
@@ -112,7 +258,7 @@ function App() {
               messages.map(message => (
                 <div key={message.id} className={`message ${message.isUser ? 'user-message' : 'assistant-message'}`}>
                   <div className="message-content">
-                    <div className="message-text">{message.text}</div>
+                    <div className={`message-text ${message.isStreaming ? 'typing-cursor' : ''}`}>{message.text}</div>
 
                     {!message.isUser && message.response && (
                       <div className="response-details">
@@ -125,7 +271,7 @@ function App() {
                                 <div key={index} className="image-card">
                                   <div className="image-container">
                                     <img
-                                      src={`/${img.image_path}`}
+                                      src={buildUrl(DATA_BASE_URL, img.image_path)}
                                       alt={img.image_desc}
                                       onError={(e) => {
                                         (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Image+Not+Found';
@@ -147,7 +293,7 @@ function App() {
                               {message.response.sources.map((source, index) => (
                                 <div key={index} className="source-item">
                                   <a
-                                    href={`http://localhost:8000/data/pdf/${encodeURIComponent(formatFileName(source.file_name))}#page=${source.page}`}
+                                    href={`${toPdfUrl(source.file_name)}#page=${normalizePage(source.page)}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="source-link"
@@ -167,7 +313,7 @@ function App() {
               ))
             )}
 
-            {loading && (
+            {loading && messages.length === 0 && (
               <div className="message assistant-message">
                 <div className="message-content">
                   <div className="message-text">
