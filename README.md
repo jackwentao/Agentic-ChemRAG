@@ -1,19 +1,13 @@
-# Agentic-ChemRAG-v1
+# Agentic-ChemRAG
 
 **面向化学与材料文献的 PDF 上传、索引与问答应用。** 支持异步解析、文档范围提问、页码引用和关联图片返回。
 
 [演示视频](https://github.com/jackwentao/Agentic-ChemRAG/issues/2) · [架构](docs/ARCHITECTURE.md) · [测试指南](docs/TESTING.md)
 
 
-## ChemRAG 仓库导航
+## 离线检索与页级引用评测
 
-三个仓库分别探索不同实现路线，源码与运行环境各自独立：
-
-| 仓库 | 定位 | 核心实现 |
-| --- | --- | --- |
-| [Agentic-ChemRAG](https://github.com/jackwentao/Agentic-ChemRAG) | 早期文献问答原型 | 本地 PDF、ChromaDB、LangChain、React |
-| [Agentic-ChemRAG-v1](https://github.com/jackwentao/Agentic-ChemRAG-v1) | 文档上传与问答应用 | pgvector、Celery、MinIO、LangGraph、页码引用 |
-| [Multi_Agent_ChemRAG](https://github.com/jackwentao/Multi_Agent_ChemRAG) | 模块化后端与编排实验 | 核心契约、异步导入、共享仓储、Agent 工作流骨架 |
+基于化学与材料领域的精选科技文献验证集，从 PDF 解析、画像筛选到篇内取证与引用定位完成离线检索评测，覆盖跨文献筛选、材料实体匹配及图注证据检索。文档 Recall@5 为 [87.5%](scripts/evaluate_profile_refactor.py)，页级引用命中率为 [91.7%](docs/reports/profile-retrieval.md)。 模型调用与数据库服务均关闭，复现条件和逐项指标见[报告目录](docs/reports/)。
 
 ## 架构概览
 
